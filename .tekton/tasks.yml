@@ -1,0 +1,39 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cleanup
+  labels:
+    app.kubernetes.io/part-of: cicd-final-project
+spec:
+  description: Remove old project files from the shared workspace before a new run.
+  workspaces:
+    - name: source
+  steps:
+    - name: cleanup
+      image: alpine:3.20
+      script: |
+        #!/bin/sh
+        set -eu
+        echo "Cleaning workspace: $(workspaces.source.path)"
+        find "$(workspaces.source.path)" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+        echo "Workspace cleanup completed."
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: nose
+  labels:
+    app.kubernetes.io/part-of: cicd-final-project
+spec:
+  description: Install the Python test tools and run the unit tests with Nose.
+  workspaces:
+    - name: source
+  steps:
+    - name: run-unit-tests-with-nose
+      image: python:3.9-slim
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -eu
+        python -m pip install --no-cache-dir nose coverage
+        nosetests -v --with-coverage --cover-package=service tests
