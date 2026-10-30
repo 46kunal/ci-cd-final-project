@@ -8,15 +8,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Lint with flake8 and Run unit tests with nose
+  build:
+    name: Build
     runs-on: ubuntu-latest
-
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
@@ -26,10 +40,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install flake8 nose coverage
 
-      - name: Lint with flake8
+      - name: Linting
         run: |
           flake8 service tests --count --show-source --statistics
 
-      - name: Run unit tests with nose
+      - name: Run unit tests
         run: |
           nosetests -v --with-coverage --cover-package=service tests
