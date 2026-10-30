@@ -1,6 +1,9 @@
-# CI/CD Final Project
+# ci-cd-final-project
 
 ## Project Name
+ci-cd-final-project
+
+## Project Title
 CI/CD Pipeline Implementation Using GitHub Actions, Tekton, and OpenShift
 
 ## Project Description
