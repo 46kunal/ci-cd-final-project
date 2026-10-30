@@ -1,0 +1,121 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: cicd-final-pipeline-v2
+  namespace: crt-46-kunal-dev
+spec:
+  description: Six-stage Python CI/CD pipeline
+  workspaces:
+    - name: shared-workspace
+  tasks:
+    - name: cleanup
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: clean
+            image: alpine:3.20
+            script: |
+              #!/bin/sh
+              set -eu
+              find "$(workspaces.source.path)" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    - name: git-clone
+      runAfter: [cleanup]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: clone
+            image: alpine/git:2.47.2
+            workingDir: $(workspaces.source.path)
+            script: |
+              #!/bin/sh
+              set -eu
+              git clone --depth 1 https://github.com/46kunal/cicd-final-project.git .
+    - name: flake8
+      runAfter: [git-clone]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: lint
+            image: python:3.9-slim
+            workingDir: $(workspaces.source.path)
+            script: |
+              #!/bin/sh
+              set -eu
+              python -m pip install --no-cache-dir flake8
+              flake8 service tests --count --show-source --statistics
+    - name: nose
+      runAfter: [flake8]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: unit-tests
+            image: python:3.9-slim
+            workingDir: $(workspaces.source.path)
+            script: |
+              #!/bin/sh
+              set -eu
+              python -m pip install --no-cache-dir nose coverage
+              nosetests -v --with-coverage --cover-package=service tests
+    - name: buildah
+      runAfter: [nose]
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      taskSpec:
+        workspaces:
+          - name: source
+        steps:
+          - name: build-and-push
+            image: quay.io/buildah/stable:v1.37
+            workingDir: $(workspaces.source.path)
+            env:
+              - name: STORAGE_DRIVER
+                value: vfs
+              - name: BUILDAH_ISOLATION
+                value: chroot
+              - name: HOME
+                value: /tmp
+            script: |
+              #!/bin/sh
+              set -eu
+              REGISTRY="image-registry.openshift-image-registry.svc:5000"
+              IMAGE="$REGISTRY/crt-46-kunal-dev/cicd-final-project:latest"
+              buildah bud --isolation=chroot --format=oci -t "$IMAGE" .
+              TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              buildah login --tls-verify=false -u serviceaccount -p "$TOKEN" "$REGISTRY"
+              buildah push --tls-verify=false "$IMAGE" "docker://$IMAGE"
+    - name: deploy
+      runAfter: [buildah]
+      taskSpec:
+        steps:
+          - name: openshift-client
+            image: quay.io/openshift/origin-cli:4.16
+            script: |
+              #!/bin/sh
+              set -eu
+              IMAGE="image-registry.openshift-image-registry.svc:5000/crt-46-kunal-dev/cicd-final-project:latest"
+              if oc get deployment cicd-final-project >/dev/null 2>&1; then
+                oc set image deployment/cicd-final-project cicd-final-project="$IMAGE"
+                oc rollout restart deployment/cicd-final-project
+              else
+                oc create deployment cicd-final-project --image="$IMAGE"
+                oc expose deployment cicd-final-project --port=8080 --target-port=8080
+              fi
+              oc rollout status deployment/cicd-final-project --timeout=180s
+              oc get pods
